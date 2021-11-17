@@ -1,14 +1,13 @@
 ---
-title: "p8105_hw3_jl6048"
+title: "p8105_hw5_jl6048"
 author: Jinghan Liu
 output: github_document
-date: Octorber 19 2021
+date: Nov. 16 2021
 ---
 
 
 ```{r message=FALSE}
 library(tidyverse)
-library(p8105.datasets)
 library(readxl)
 
 knitr::opts_chunk$set(
@@ -22,260 +21,121 @@ knitr::opts_chunk$set(
 
 ## Problem 1
 
-**How many aisles are there, and which aisles are the most items ordered from?**
-
-* There are 134 aisles in this data set and the most items are ordered from the fresh vegetables aisles.
+Imports and clean data
 ```{r}
-data("instacart")
-instacart_df =
-  instacart %>%
-  janitor::clean_names()%>%
-  count(aisle) %>%
-  arrange(desc(n))
-instacart_df
-```
-
-
-**Make a plot that shows the number of items ordered in each aisle, limiting this to aisles with more than 10000 items ordered**
-```{r}
-instacart_df %>%
-  filter(n > 10000) %>%
+homicide_df =
+  read_csv("./data/homicide-data.csv", na = c("","Unknown")) %>%
   mutate(
-    aisle = factor(aisle),
-    aisle = fct_reorder(aisle, n)) %>%
-   ggplot(aes(x = aisle, y = n)) + 
-  geom_point() + 
-  labs(
-    title = "The number of items ordered in each aisle",
-    x = "aisle name",
-    y = "order numbers",
-    caption = "Data from the instacart") + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
-
+        city_state = str_c(city, state),
+        resolution = case_when(
+           disposition == "Closed without arrest" ~"unsolved",
+           disposition == "Open/No arrest" ~"unsolved",
+           disposition == "Closed by arrest" ~"solved"
+           ))%>%
+  relocate(city_state) %>%
+  filter(city_state != "TulsaAL")
+homicide_df
 ```
 
-
-**Make a table showing the three most popular items**
+Let's focus on Baltimore, MD
 
 ```{r}
-popitems_df = 
-  instacart %>%
-  filter(aisle %in% c("baking ingredients", "dog food care", "packaged vegetables fruits")) %>% 
-	group_by(aisle) %>% 
-	count(product_name) %>% 
-	mutate(rank = min_rank(desc(n))) %>%
-	filter(rank < 4) %>% 
-	arrange(aisle, rank) %>% 
-	knitr::kable()
-popitems_df
+baltimore_df =
+  homicide_df %>%
+  filter(city_state == "BaltimoreMD")
+
+baltimore_summary =
+  baltimore_df %>%
+  summarize(
+    unsolved = sum(resolution == "unsolved"),
+    n = n()
+  )
+
+baltimore_test =
+prop.test(
+  x = baltimore_summary %>% pull(unsolved),
+  n= baltimore_summary %>% pull(n))
+
+baltimore_test %>%
+  broom::tidy()
 ```
 
 
-**Make a table showing the mean hour of the day at which Pink Lady Apples and Coffee Ice Cream are ordered on each day of the week;**
+Let's try to iterate across cities!
+```{r}
+prop_test_function = function(city_df){
+  
+  city_summary =
+    city_df %>%
+    summarize(
+      unsolved = sum(resolution == "unsolved"),
+      n= n()
+    )
+  city_test =
+    prop.test(
+      x = city_summary %>% pull(unsolved),
+      n = city_summary %>% pull(n))
+  
+  return(city_test)
+}
+
+prop_test_function(baltimore_df)
+
+homicide_df %>%
+  filter(city_state =="AlbuquerqueNM") %>%
+  prop_test_function()
+
+```
+
+Now, let's iterate across all cities
+```{r}
+results_df =
+  homicide_df %>%
+  nest(data = uid:resolution)%>%
+  mutate(
+    test_results = map(data, prop_test_function),
+    tidy_results = map(test_results, broom::tidy)
+  )%>%
+  select(city_state,tidy_results)%>%
+  unnest(tidy_results)%>%
+  select(city_state,estimate, starts_with("conf"))
+results_df
+```
+
+
+Try to make a plot showing estimates and confidence intervals.
 
 ```{r}
-meanhour_df =
-  instacart %>%
-  filter(product_name %in% c("Pink Lady Apples","Coffee Ice Cream")) %>%
-  group_by(product_name, order_dow) %>%
-  summarize(mean_hour = mean(order_hour_of_day)) %>%
-  pivot_wider(
-    names_from = order_dow,
-    values_from = mean_hour) %>% 
-  rename(
-    sun. = "0", mon. = "1", tue. = "2", 
-    wed. = "3", thu. = "4", fri. = "5", sat. = "6") %>% 
-  knitr::kable()
- meanhour_df 
+results_df %>%
+  mutate(city_state = fct_reorder(city_state,estimate))%>%
+  ggplot(aes(x = city_state,y = estimate))+
+  geom_point()+
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5,hjust =1))
+  
 ```
 
-**Description**:
-This datasets has `r nrow(instacart)` observations and `r ncol(instacart)` variables.
-
-The key variables are as follows:
-*  `product_name`: name of the product
-*  `aisle`: name of the aisle
-*  `order_dow`: the day of the week on which the order was placed
-*  `order_hour_of_day`: the hour of the day on which the order was placed
-*  `order_id`: order identifier
-*  `product_id`: product identifier
-
-For example, the individual with user id 66177 ordered `r instacart %>% filter(user_id == 66177) %>% summarize(max(add_to_cart_order))` and they are most from the `r instacart %>% filter(user_id == 66177) %>% summarize(max(department))` department. 
+```{r}
+homicide_df %>%
+  group_by(city_state)%>%
+  summarize(
+    unsolved = sum(resolution =="unsolved"),
+    n = n()
+  )%>%
+  mutate(
+    test_results = map2(unsolved, n, prop.test),
+    tidy_results = map(test_results, broom::tidy)
+  )%>%
+  select(city_state,tidy_results)%>%
+  unnest(tidy_results)%>%
+  select(city_state,estimate, starts_with("conf"))
+```
 
 
 
 ## Problem 2
-
-**data cleaning**
 ```{r}
-data("brfss_smart2010")
-brfss_smart=
-  brfss_smart2010 %>%
-  janitor::clean_names() %>%
-  filter(topic == "Overall Health") %>%
-  mutate(
-    response = forcats::fct_relevel(response, c("Excellent", "Very good", "Good", "Fair", "Poor"))) %>%
-  arrange(desc(response))
-brfss_smart
+tibble(
+  files = list.files("./data/zip_data/"))
 ```
-
-
-**In 2002, which states were observed at 7 or more locations? What about in 2010?**
-```{r}
-states_2002_df =
-  brfss_smart2010 %>%
-  janitor::clean_names() %>%
-  filter(year == 2002) %>%
-  group_by(locationabbr) %>%
-  summarize(
-    country_num = n_distinct(locationdesc)) %>% 
-  filter(country_num >= 7)
-states_2002_df
-
-states_2010_df =
-  brfss_smart2010 %>%
-  janitor::clean_names() %>%
-  filter(year == 2010) %>%
-  group_by(locationabbr) %>%
-  summarize(
-    country_num = n_distinct(locationdesc)) %>% 
-  filter(country_num >= 7)
-states_2010_df
-```
-*Solution: 
-In 2002, `r pull(states_2002_df,locationabbr)` were observed at 7 or more locations. 
-In 2010, `r pull(states_2010_df,locationabbr)` were observed at 7 or more locations.
-
-
-**Construct a dataset that is limited to Excellent responses. Make a “spaghetti” plot of this average value over time within a state .**
-
-```{r}
-excellent_resp =
-  brfss_smart2010 %>%
-  janitor::clean_names() %>%
-  filter(response == "Excellent") %>%
-  group_by(locationabbr,year) %>%
-  summarize(
-    ave_value = mean(data_value)) %>% 
-  select(year, locationabbr, ave_value)  %>% 
-  
-   ggplot(aes(x = year, y = ave_value,  color = locationabbr)) +
-  geom_line(aes(group = locationabbr)) +
-  labs(
-    title = " Average value over time for states ",
-    x = "Year",
-    y = "Average%",
-    caption = "Data from BRFSS") +
-  theme(legend.position = "bottom") +
-  scale_y_continuous(
-    breaks = c(10, 15, 20, 25, 30), 
-    limits = c(10, 30))
-excellent_resp
-```
-*Solution:
-Above is the spaghetti plot of  average value over time within the 51 states. Because there are many states, it cannot easy to distinguish each one. However, we can still observe the extreme decrease in 2005.
-
-
-**Make a two-panel plot for the years 2006, and 2010**
-
-```{r}
-two_panel =
-  brfss_smart2010 %>%
-  janitor::clean_names() %>%
-  filter(year == "2006" | year == "2010")%>%
-  filter(locationabbr == "NY") %>%
-  mutate(data_value = as.numeric(data_value), 
-         year = as.factor(year), 
-         locationdesc = as.factor(locationdesc),
-         response = as.factor(response)) %>%
-  filter(response %in% c("Poor", "Fair", "Good", "Very good", "Excellent")) %>% 
-  mutate(
-    response = factor(response, levels = c("Poor", "Fair", "Good", "Very good", "Excellent")))%>% 
-  select(year, data_value, locationdesc, response) %>%
-  
-  ggplot(aes(x = response, y = data_value)) +
-  geom_bar(stat = "identity", fill="steelblue", position=position_dodge()) + facet_grid(. ~year) +
-  labs(
-    title = "Distribution of data_value for responses",
-    x = "Response Level",
-    y = "data_value") + 
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) 
-
-two_panel
-```
-
-*Solution
-The distribution of response in NY state between 2006 and 2010 are quite similar.
-
-
-## Problem 3
-
-**Load, tidy, and otherwise wrangle the data **
-```{r}
-accel_data = 
-  read_csv("./data/accel_data.csv") %>%
-  janitor::clean_names() %>%
-pivot_longer(
-    cols = activity_1:activity_1440,
-    names_to = "minute",
-    values_to = "activity_amount",
-    names_prefix = "activity_") %>%
-mutate(day_type = ifelse(day == "Saturday" | day == "Sunday", "Weekend", "Weekday"))  %>%
-  mutate(minute = as.numeric(minute),
-    day = forcats::fct_relevel(day, c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")))
-accel_data
-```
-*Description:
-The data set contain `r nrow(accel_data)` observations of `r ncol(accel_data)` variables. These variables include "week", "day_id","day","minute", "activity_amount", "day_type".
-
-
-
-**aggregate across minutes to create a total activity variable for each day**
-```{r}
-aggre_table =
-  accel_data %>%
-  group_by(week, day) %>% 
-  summarize(sum_day = sum(activity_amount)) %>% 
-pivot_wider(
-  names_from = "day",
-  values_from = "sum_day") %>% 
-  
-knitr::kable()
-aggre_table
-```
-*Solution:
-I think the table didn't show any trends apparent.
-
-
-**Make a single-panel plot that shows the 24-hour activity time courses for each day**
-```{r}
-activity_day_plot =
-  accel_data %>%
-  mutate(
-    minute = as.numeric(as.character(minute))
-  ) %>% 
-  group_by(day, minute) %>% 
-  summarize(
-    mean_activity_day = mean(activity_amount)
-  ) %>% 
-  ggplot(aes(x = minute, y = mean_activity_day, color = day, group = day)) +
-  geom_smooth(se = FALSE) +
-  labs(
-    title = "24-hour Activity Time Courses  By Day of Week ",
-    x = "Time of the Day",
-    y = "Activity Count",
-    caption = "Data from the Advanced Cardiac Care Center of Columbia University Medical Center") +
-  viridis::scale_color_viridis(
-    name = "Day of Week", 
-    discrete = TRUE
-  ) +
-   scale_x_continuous(
-    breaks = c(0, 180, 360, 540, 720, 900, 1080, 1260, 1440), 
-    labels = c("00:00","03:00", "06:00", "09:00","12:00", "15:00", "18:00", "21:00", "24:00"),
-    limits = c(0, 1440)) 
-activity_day_plot
-```
-
-*Conclusion:
-On average, this person is most active between 6 and 10 in the evening and is always less active in the morning. On Sunday, most of his activities are at noon.
 
