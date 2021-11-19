@@ -2,7 +2,6 @@
 title: "p8105_hw5_jl6048"
 author: Jinghan Liu
 output: github_document
-date: Nov. 16 2021
 ---
 
 
@@ -170,7 +169,42 @@ p2_df %>%
     y = "Observation value",
     caption = "Data from the longitudinal study"
   ) +
-  facet_grid(. ~ arm)
+  facet_grid(. ~ arm)+
+   viridis::scale_color_viridis(discrete = TRUE) + 
+  theme(legend.position = "right")
+
 ```
-** Comment:
+**Comment**:
 Obviously, the observation value of the experimental group of the study is higher than that of the control group.
+
+
+## Problem 3
+
+```{r}
+library(tidyverse)
+
+set.seed(10)
+
+iris_with_missing = iris %>% 
+  map_df(~replace(.x, sample(1:150, 20), NA)) %>%
+  mutate(Species = as.character(Species))
+```
+
+```{r}
+fill_in_missing  = function(x){
+  
+  if (is.numeric(x)){
+    x = replace_na(x, mean(x, na.rm = TRUE))
+  } 
+  if (is.character(x)){
+     x = replace_na(x, "virginica")
+  }
+  x
+}
+
+iris_cleaned = map(iris_with_missing, fill_in_missing) %>% 
+  as_tibble() 
+iris_cleaned
+
+```
+
